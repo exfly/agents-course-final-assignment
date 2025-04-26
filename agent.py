@@ -112,7 +112,25 @@ def arvix_search(query: str) -> str:
         ])
     return {"arvix_results": formatted_search_docs}
 
-# build a retriever tool
+tools = [
+    multiply,
+    add,
+    subtract,
+    divide,
+    modulus,
+    wiki_search,
+    web_search,
+    arvix_search,
+]
+
+# load the system prompt from the file
+with open("system_prompt.txt", "r", encoding="utf-8") as f:
+    system_prompt = f.read()
+
+# System message
+sys_msg = SystemMessage(content=system_prompt)
+
+# build a retriever
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2") #  dim=768
 supabase: Client = create_client(
     os.environ.get("SUPABASE_URL"), 
@@ -123,34 +141,6 @@ vector_store = SupabaseVectorStore(
     table_name="documents",
     query_name="match_documents_langchain",
 )
-question_retrieve_tool = create_retriever_tool(
-    vector_store.as_retriever(),
-    "Question Retriever",
-    "Find similar questions in the vector database for the given question.",
-)
-
-
-
-tools = [
-    multiply,
-    add,
-    subtract,
-    divide,
-    modulus,
-    wiki_search,
-    web_search,
-    arvix_search,
-    question_retrieve_tool
-]
-
-# load the system prompt from the file
-with open("system_prompt.txt", "r", encoding="utf-8") as f:
-    system_prompt = f.read()
-
-# System message
-sys_msg = SystemMessage(content=system_prompt)
-
-
 
 # Build graph function
 def build_graph(provider: str = "groq"):
@@ -161,7 +151,7 @@ def build_graph(provider: str = "groq"):
         llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
     elif provider == "groq":
         # Groq https://console.groq.com/docs/models
-        llm = ChatGroq(model="gemma2-9b-it", temperature=0) # optional : qwen-qwq-32b
+        llm = ChatGroq(model="qwen-qwq-32b", temperature=0) # optional : qwen-qwq-32b gemma2-9b-it
     elif provider == "huggingface":
         # TODO: Add huggingface endpoint
         llm = ChatHuggingFace(
@@ -173,17 +163,27 @@ def build_graph(provider: str = "groq"):
     else:
         raise ValueError("Invalid provider. Choose 'google', 'groq' or 'huggingface'.")
     # Bind tools to LLM
-    llm_with_tools = llm.bind_tools(tools)
+    llm_with_tools = llm.bind_tools(tools, tool_choice="Question Search")
 
     # Node
     def assistant(state: MessagesState):
         """Assistant node"""
-        return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+        return {"messages": [llm_with_tools.invoke(state["messages"])]}
+    
+    def retriever(state: MessagesState):
+        """Retriever node"""
+        similar_question = vector_store.similarity_search(state["messages"][0].content)
+        example_msg = HumanMessage(
+            content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
+        )
+        return {"messages": [sys_msg] + state["messages"] + [example_msg]}
 
     builder = StateGraph(MessagesState)
+    builder.add_node("retriever", retriever)
     builder.add_node("assistant", assistant)
     builder.add_node("tools", ToolNode(tools))
-    builder.add_edge(START, "assistant")
+    builder.add_edge(START, "retriever")
+    builder.add_edge("retriever", "assistant")
     builder.add_conditional_edges(
         "assistant",
         tools_condition,
@@ -195,13 +195,11 @@ def build_graph(provider: str = "groq"):
 
 # test
 if __name__ == "__main__":
-    question = "Who nominated the only Featured Article on English Wikipedia about a dinosaur that was promoted in November 2016?"
-
+    question = "When was a picture of St. Thomas Aquinas first added to the Wikipedia page on the Principle of double effect?"
     # Build the graph
     graph = build_graph(provider="groq")
     # Run the graph
     messages = [HumanMessage(content=question)]
     messages = graph.invoke({"messages": messages})
-    answer = messages[-1].content
-    print(f"Question: {question}")
-    print(f"{answer}")
+    for m in messages["messages"]:
+        m.pretty_print()

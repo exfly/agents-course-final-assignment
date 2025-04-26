@@ -28,7 +28,7 @@ class BasicAgent:
         # Wrap the question in a HumanMessage from langchain_core
         messages = [HumanMessage(content=question)]
         messages = self.graph.invoke({"messages": messages})
-        answer = messages[-1].content
+        answer = messages['messages'][-1].content
         return answer
 
 

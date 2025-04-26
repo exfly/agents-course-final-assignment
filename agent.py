@@ -13,6 +13,7 @@ from langchain_community.document_loaders import ArxivLoader
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
+from langchain.tools.retriever import create_retriever_tool
 from supabase.client import Client, create_client
 
 load_dotenv()
@@ -111,16 +112,7 @@ def arvix_search(query: str) -> str:
         ])
     return {"arvix_results": formatted_search_docs}
 
-tools = [
-    multiply,
-    add,
-    subtract,
-    divide,
-    modulus,
-    wiki_search,
-    web_search,
-    arvix_search,
-]
+
 
 # load the system prompt from the file
 with open("system_prompt.txt", "r", encoding="utf-8") as f:
@@ -140,6 +132,24 @@ vector_store = SupabaseVectorStore(
     table_name="documents",
     query_name="match_documents_langchain",
 )
+create_retriever_tool = create_retriever_tool(
+    retriever=vector_store.as_retriever(),
+    name="Question Search",
+    description="A tool to retrieve similar questions from a vector store.",
+)
+
+
+
+tools = [
+    multiply,
+    add,
+    subtract,
+    divide,
+    modulus,
+    wiki_search,
+    web_search,
+    arvix_search,
+]
 
 # Build graph function
 def build_graph(provider: str = "groq"):
@@ -162,7 +172,7 @@ def build_graph(provider: str = "groq"):
     else:
         raise ValueError("Invalid provider. Choose 'google', 'groq' or 'huggingface'.")
     # Bind tools to LLM
-    llm_with_tools = llm.bind_tools(tools, tool_choice="Question Search")
+    llm_with_tools = llm.bind_tools(tools)
 
     # Node
     def assistant(state: MessagesState):

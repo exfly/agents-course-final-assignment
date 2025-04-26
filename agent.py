@@ -13,7 +13,6 @@ from langchain_community.document_loaders import ArxivLoader
 from langchain_community.vectorstores import SupabaseVectorStore
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
-from langchain.tools.retriever import create_retriever_tool
 from supabase.client import Client, create_client
 
 load_dotenv()

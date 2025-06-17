@@ -1,22 +1,28 @@
 """LangGraph Agent"""
+
 import os
+
 from dotenv import load_dotenv
-from langgraph.graph import START, StateGraph, MessagesState
-from langgraph.prebuilt import tools_condition
-from langgraph.prebuilt import ToolNode
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint, HuggingFaceEmbeddings
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_community.document_loaders import WikipediaLoader
-from langchain_community.document_loaders import ArxivLoader
-from langchain_community.vectorstores import SupabaseVectorStore
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
-from supabase.client import Client, create_client
+from langchain_community.document_loaders import ArxivLoader, WikipediaLoader
+
+# https://python.langchain.com.cn/docs/modules/data_connection/text_embedding/integrations/sentence_transformers
+from langchain_community.embeddings import SentenceTransformerEmbeddings
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import tool
+
+# pip install -qU  langchain_milvus
+# pip install arxiv
+# pip install pymupdf
+from langchain_milvus import Milvus
+from langchain_openai import ChatOpenAI
+from langfuse.langchain import CallbackHandler
+from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode, tools_condition
 
 load_dotenv()
+
 
 @tool
 def multiply(a: int, b: int) -> int:
@@ -28,30 +34,33 @@ def multiply(a: int, b: int) -> int:
     """
     return a * b
 
+
 @tool
 def add(a: int, b: int) -> int:
     """Add two numbers.
-    
+
     Args:
         a: first int
         b: second int
     """
     return a + b
 
+
 @tool
 def subtract(a: int, b: int) -> int:
     """Subtract two numbers.
-    
+
     Args:
         a: first int
         b: second int
     """
     return a - b
 
+
 @tool
 def divide(a: int, b: int) -> int:
     """Divide two numbers.
-    
+
     Args:
         a: first int
         b: second int
@@ -60,20 +69,22 @@ def divide(a: int, b: int) -> int:
         raise ValueError("Cannot divide by zero.")
     return a / b
 
+
 @tool
 def modulus(a: int, b: int) -> int:
     """Get the modulus of two numbers.
-    
+
     Args:
         a: first int
         b: second int
     """
     return a % b
 
+
 @tool
 def wiki_search(query: str) -> str:
     """Search Wikipedia for a query and return maximum 2 results.
-    
+
     Args:
         query: The search query."""
     search_docs = WikipediaLoader(query=query, load_max_docs=2).load()
@@ -81,37 +92,41 @@ def wiki_search(query: str) -> str:
         [
             f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
             for doc in search_docs
-        ])
+        ]
+    )
     return {"wiki_results": formatted_search_docs}
+
 
 @tool
 def web_search(query: str) -> str:
     """Search Tavily for a query and return maximum 3 results.
-    
+
     Args:
         query: The search query."""
-    search_docs = TavilySearchResults(max_results=3).invoke(query=query)
+    search_docs = TavilySearchResults(max_results=3).invoke(input=query)
     formatted_search_docs = "\n\n---\n\n".join(
         [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
+            f'<Document source="{doc["url"]}" />\n{doc["content"]}\n</Document>'
             for doc in search_docs
-        ])
+        ]
+    )
     return {"web_results": formatted_search_docs}
+
 
 @tool
 def arvix_search(query: str) -> str:
     """Search Arxiv for a query and return maximum 3 result.
-    
+
     Args:
         query: The search query."""
     search_docs = ArxivLoader(query=query, load_max_docs=3).load()
     formatted_search_docs = "\n\n---\n\n".join(
         [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
+            f'<Document source="{doc.metadata["Title"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
             for doc in search_docs
-        ])
+        ]
+    )
     return {"arvix_results": formatted_search_docs}
-
 
 
 # load the system prompt from the file
@@ -121,23 +136,22 @@ with open("system_prompt.txt", "r", encoding="utf-8") as f:
 # System message
 sys_msg = SystemMessage(content=system_prompt)
 
-# build a retriever
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2") #  dim=768
-supabase: Client = create_client(
-    os.environ.get("SUPABASE_URL"), 
-    os.environ.get("SUPABASE_SERVICE_KEY"))
-vector_store = SupabaseVectorStore(
-    client=supabase,
-    embedding= embeddings,
-    table_name="documents",
-    query_name="match_documents_langchain",
-)
-create_retriever_tool = create_retriever_tool(
-    retriever=vector_store.as_retriever(),
-    name="Question Search",
-    description="A tool to retrieve similar questions from a vector store.",
+URI = "./milvus_example.db"
+
+# https://zhuanlan.zhihu.com/p/29949362142
+embedding_function = SentenceTransformerEmbeddings(model_name="moka-ai/m3e-base")
+
+vector_store = Milvus(
+    embedding_function=embedding_function,
+    connection_args={"uri": URI},
+    collection_name="documents",
 )
 
+retriever_tool = create_retriever_tool(
+    retriever=vector_store.as_retriever(),
+    name="QuestionSearch",
+    description="A tool to retrieve similar questions from a vector store.",
+)
 
 
 tools = [
@@ -149,25 +163,20 @@ tools = [
     wiki_search,
     web_search,
     arvix_search,
+    retriever_tool,
 ]
 
+
 # Build graph function
-def build_graph(provider: str = "groq"):
+def build_graph(provider: str = "openai"):
     """Build the graph"""
     # Load environment variables from .env file
-    if provider == "google":
-        # Google Gemini
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
-    elif provider == "groq":
-        # Groq https://console.groq.com/docs/models
-        llm = ChatGroq(model="qwen-qwq-32b", temperature=0) # optional : qwen-qwq-32b gemma2-9b-it
-    elif provider == "huggingface":
-        # TODO: Add huggingface endpoint
-        llm = ChatHuggingFace(
-            llm=HuggingFaceEndpoint(
-                url="https://api-inference.huggingface.co/models/Meta-DeepLearning/llama-2-7b-chat-hf",
-                temperature=0,
-            ),
+    if provider == "openai":
+        llm = ChatOpenAI(
+            model=os.environ["OPENAI_MODEL"],
+            base_url=os.environ["OPENAI_BASE_URL"],
+            api_key=os.environ["OPENAI_API_KEY"],
+            temperature=0,
         )
     else:
         raise ValueError("Invalid provider. Choose 'google', 'groq' or 'huggingface'.")
@@ -178,10 +187,12 @@ def build_graph(provider: str = "groq"):
     def assistant(state: MessagesState):
         """Assistant node"""
         return {"messages": [llm_with_tools.invoke(state["messages"])]}
-    
+
     def retriever(state: MessagesState):
         """Retriever node"""
-        similar_question = vector_store.similarity_search(state["messages"][0].content)
+        similar_question = vector_store.similarity_search(
+            state["messages"][0].content, k=1
+        )
         example_msg = HumanMessage(
             content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
         )
@@ -202,13 +213,21 @@ def build_graph(provider: str = "groq"):
     # Compile graph
     return builder.compile()
 
+
 # test
 if __name__ == "__main__":
+    langfuse_handler = CallbackHandler()
+
     question = "When was a picture of St. Thomas Aquinas first added to the Wikipedia page on the Principle of double effect?"
     # Build the graph
-    graph = build_graph(provider="groq")
+    graph = build_graph(provider="openai")
     # Run the graph
     messages = [HumanMessage(content=question)]
-    messages = graph.invoke({"messages": messages})
+    messages = graph.invoke(
+        input={"messages": messages},
+        config={"callbacks": [langfuse_handler]},
+    )
     for m in messages["messages"]:
         m.pretty_print()
+
+# https://huggingface.co/spaces/agents-course/Unit4-Final-Certificate

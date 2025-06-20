@@ -218,7 +218,7 @@ def build_graph(provider: str = "openai"):
 if __name__ == "__main__":
     langfuse_handler = CallbackHandler()
 
-    question = "When was a picture of St. Thomas Aquinas first added to the Wikipedia page on the Principle of double effect?"
+    question = "What country had the least number of athletes at the 1928 Summer Olympics? If there's a tie for a number of athletes, return the first in alphabetical order. Give the IOC country code as your answer."
     # Build the graph
     graph = build_graph(provider="openai")
     # Run the graph

@@ -13,3 +13,11 @@ hf_oauth_expiration_minutes: 480
 ---
 
 Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+
+Refer project https://huggingface.co/learn/agents-course/unit4/introduction
+
+<!-- `langgraph` 作为 agent 框架，模型使用 ollama 部署的 cpu 的 `qwen2.5:3b`，最终以 `Juliusx` 身份获得分 
+[75](https://huggingface.co/spaces/agents-course/Students_leaderboard)。 -->
+Using `langgraph` as the agent framework and `qwen2.5:3b` model deployed on CPU via Ollama, I achieved a score of [75](https://huggingface.co/spaces/agents-course/Students_leaderboard) under the username `Juliusx`.
+
+![](./imgs/image.png)

@@ -9,7 +9,7 @@ from langchain_community.document_loaders import ArxivLoader, WikipediaLoader
 # https://python.langchain.com.cn/docs/modules/data_connection/text_embedding/integrations/sentence_transformers
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
 # pip install -qU  langchain_milvus
@@ -167,6 +167,21 @@ tools = [
 ]
 
 
+def clean_think_tags(text: str) -> str:
+    """qwen3 清理字符串中的<think>标签及其内容
+
+    Args:
+        text: 输入的字符串
+
+    Returns:
+        清理后的字符串
+    """
+    import re
+
+    pattern = r"<think>.*?</think>\s*\n?"
+    return re.sub(pattern, "", text, flags=re.DOTALL)
+
+
 # Build graph function
 def build_graph(provider: str = "openai"):
     """Build the graph"""
@@ -186,7 +201,10 @@ def build_graph(provider: str = "openai"):
     # Node
     def assistant(state: MessagesState):
         """Assistant node"""
-        return {"messages": [llm_with_tools.invoke(state["messages"])]}
+        _msg = llm_with_tools.invoke(state["messages"])
+        if isinstance(_msg, AIMessage):
+            _msg.content = clean_think_tags(_msg.content)
+        return {"messages": [_msg]}
 
     def retriever(state: MessagesState):
         """Retriever node"""
@@ -219,6 +237,7 @@ if __name__ == "__main__":
     langfuse_handler = CallbackHandler()
 
     question = "What country had the least number of athletes at the 1928 Summer Olympics? If there's a tie for a number of athletes, return the first in alphabetical order. Give the IOC country code as your answer."
+    question = "1+1="
     # Build the graph
     graph = build_graph(provider="openai")
     # Run the graph
